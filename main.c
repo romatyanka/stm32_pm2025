@@ -27,12 +27,10 @@ int current_freq_index = 6;
 int frequency_changed = 0;
 
 void delay(uint32_t ticks) {
-	for (int i=0; i<ticks; i++) {
-		__NOP();
-	}
     for (volatile uint32_t i = 0; i < ticks; i++) {
         __NOP();
     }
+    for (volatile uint32_t i = 0; i < ticks; i++);
 }
 
 void init_led(void) {
@@ -41,20 +39,18 @@ void init_led(void) {
     GPIOC->CRH |= GPIO_CRH_MODE13_0;
 }
 
-int __attribute((noreturn)) main(void) {
-	// Enable clock for AFIO
-	RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
-	// Enable clock for GPIOC
-	RCC->APB2ENR |= RCC_APB2ENR_IOPCEN;
-	// Enable PC13 push-pull mode
-	GPIOC->CRH &= ~GPIO_CRH_CNF13; //clear cnf bits
-	GPIOC->CRH |= GPIO_CRH_MODE13_0; //Max speed = 10Mhz
 void init_buttons(void) {
     RCC->APB2ENR |= RCC_APB2ENR_IOPBEN;
     GPIOB->CRL &= ~(GPIO_CRL_CNF0 | GPIO_CRL_CNF1);
     GPIOB->CRL |= (GPIO_CRL_CNF0_1 | GPIO_CRL_CNF1_1);
     GPIOB->BSRR = GPIO_BSRR_BS0 | GPIO_BSRR_BS1;
 }
+void SPI1_Init(void);
+void SPI1_Write(uint8_t data);
+uint8_t SPI1_Read(void);
+void SSD1306_Init(void);
+void SSD1306_DrawChessBoard(void);
+void SSD1306_Update(void);
 
 void handle_buttons(void) {
     // Кнопка PB0 - увеличение частоты
@@ -67,8 +63,16 @@ void handle_buttons(void) {
             delay(10000);
         }
         return;
+int main(void) {
+    *(volatile uint32_t*)(0x40021000 + 0x18) |= (1 << 4);
+    *(volatile uint32_t*)(0x40011000 + 0x04) |= (1 << 20);
+    for(int i = 0; i < 3; i++) {
+        *(volatile uint32_t*)(0x40011000 + 0x0C) |= (1 << 13);
+        delay(100000);
+        *(volatile uint32_t*)(0x40011000 + 0x0C) &= ~(1 << 13);
+        delay(100000);
     }
-    
+
     // Кнопка PB1 - уменьшение частоты
     if (!(GPIOB->IDR & GPIO_IDR_IDR1)) {
         if (current_freq_index > 0) {
@@ -86,12 +90,12 @@ int main(void) {
     RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
     init_led();
     init_buttons();
-    
+    SPI1_Init();
+    SSD1306_Init();
+    SSD1306_DrawChessBoard();
+    SSD1306_Update();
+
     while (1) {
-	    GPIOC->ODR |= (1U<<13U); //U -- unsigned suffix (to avoid syntax warnings in IDE)
-		delay(1000000);
-	    GPIOC->ODR &= ~(1U<<13U);
-	    delay(1000000);
         handle_buttons();
         if (frequency_changed) {
             for (int i = 0; i < 3; i++) {
@@ -108,5 +112,9 @@ int main(void) {
         
         GPIOC->ODR &= ~GPIO_ODR_ODR13;
         delay(frequencies[current_freq_index].delay / 2);
+    while(1) {
+        *(volatile uint32_t*)(0x40011000 + 0x0C) ^= (1 << 13);
+        delay(500000);
     }
+}
 }

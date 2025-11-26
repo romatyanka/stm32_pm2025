@@ -1,12 +1,16 @@
 #include <stdint.h>
 #include <stm32f10x.h>
 
-typedef struct {
-    uint32_t delay;
+void delay(uint32_t ticks) {
+    for (volatile uint32_t i = 0; i < ticks; i++);
+typedef struct 
+{
+    uint32_t arr_value;
     int index;
 } frequency_t;
 
-const frequency_t frequencies[] = {
+const frequency_t frequencies[] = 
+{
     {64000000, -6},  // 1/64 Гц
     {32000000, -5},  // 1/32 Гц
     {16000000, -4},  // 1/16 Гц
@@ -25,26 +29,43 @@ const frequency_t frequencies[] = {
 const int NUM_FREQUENCIES = 13;
 int current_freq_index = 6;
 int frequency_changed = 0;
-
-void delay(uint32_t ticks) {
-    for (volatile uint32_t i = 0; i < ticks; i++) {
-        __NOP();
+void TIM2_IRQHandler(void) 
+{
+    if (TIM2->SR & TIM_SR_UIF) 
+    { 
+        TIM2->SR &= ~TIM_SR_UIF;
+        GPIOC->ODR ^= GPIO_ODR_ODR13;
     }
-    for (volatile uint32_t i = 0; i < ticks; i++);
 }
 
-void init_led(void) {
+void init_led(void) 
+{
     RCC->APB2ENR |= RCC_APB2ENR_IOPCEN;
     GPIOC->CRH &= ~GPIO_CRH_CNF13;
     GPIOC->CRH |= GPIO_CRH_MODE13_0;
 }
 
-void init_buttons(void) {
+void init_buttons(void) 
+{
     RCC->APB2ENR |= RCC_APB2ENR_IOPBEN;
     GPIOB->CRL &= ~(GPIO_CRL_CNF0 | GPIO_CRL_CNF1);
     GPIOB->CRL |= (GPIO_CRL_CNF0_1 | GPIO_CRL_CNF1_1);
-    GPIOB->BSRR = GPIO_BSRR_BS0 | GPIO_BSRR_BS1;
+    GPIOB->BSRR = GPIO_BSRR_BS0 | GPIO_BSRR_BS1; 
 }
+
+void init_timer(void) 
+{
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+    TIM2->PSC = 6400 - 1; 
+    TIM2->ARR = frequencies[current_freq_index].arr_value / 10000 - 1;
+    TIM2->CNT = 0;
+    TIM2->DIER |= TIM_DIER_UIE;
+    NVIC_EnableIRQ(TIM2_IRQn);
+    NVIC_SetPriority(TIM2_IRQn, 0);
+    
+    TIM2->CR1 |= TIM_CR1_CEN;
+}
+
 void SPI1_Init(void);
 void SPI1_Write(uint8_t data);
 uint8_t SPI1_Read(void);
@@ -52,17 +73,6 @@ void SSD1306_Init(void);
 void SSD1306_DrawChessBoard(void);
 void SSD1306_Update(void);
 
-void handle_buttons(void) {
-    // Кнопка PB0 - увеличение частоты
-    if (!(GPIOB->IDR & GPIO_IDR_IDR0)) {
-        if (current_freq_index < NUM_FREQUENCIES - 1) {
-            current_freq_index++;
-            frequency_changed = 1;
-        }
-        while (!(GPIOB->IDR & GPIO_IDR_IDR0)) {
-            delay(10000);
-        }
-        return;
 int main(void) {
     *(volatile uint32_t*)(0x40021000 + 0x18) |= (1 << 4);
     *(volatile uint32_t*)(0x40011000 + 0x04) |= (1 << 20);
@@ -71,34 +81,67 @@ int main(void) {
         delay(100000);
         *(volatile uint32_t*)(0x40011000 + 0x0C) &= ~(1 << 13);
         delay(100000);
+void handle_buttons(void) 
+{
+    // PB0 - увеличение частоты
+    if (!(GPIOB->IDR & GPIO_IDR_IDR0)) 
+    {
+        if (current_freq_index < NUM_FREQUENCIES - 1) 
+        {
+            current_freq_index++;
+            frequency_changed = 1;
+            TIM2->ARR = TIM2->ARR >> 1;
+        }
+        while (!(GPIOB->IDR & GPIO_IDR_IDR0)) {
+        }
+        return;
     }
 
-    // Кнопка PB1 - уменьшение частоты
-    if (!(GPIOB->IDR & GPIO_IDR_IDR1)) {
-        if (current_freq_index > 0) {
+    SPI1_Init();
+    SSD1306_Init();
+    SSD1306_DrawChessBoard();
+    SSD1306_Update();
+    // PB1 - уменьшение частоты
+    if (!(GPIOB->IDR & GPIO_IDR_IDR1)) 
+    {
+        if (current_freq_index > 0) 
+        {
             current_freq_index--;
             frequency_changed = 1;
+            TIM2->ARR = TIM2->ARR << 1;
         }
         while (!(GPIOB->IDR & GPIO_IDR_IDR1)) {
-            delay(10000);
         }
         return;
     }
 }
 
-int main(void) {
+void delay(uint32_t ticks) 
+{
+    for (volatile uint32_t i = 0; i < ticks; i++) 
+    {
+        __NOP();
+    }
+}
+
+int main(void) 
+{
     RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
+
+    while(1) {
+        *(volatile uint32_t*)(0x40011000 + 0x0C) ^= (1 << 13);
+        delay(500000);
     init_led();
     init_buttons();
-    SPI1_Init();
-    SSD1306_Init();
-    SSD1306_DrawChessBoard();
-    SSD1306_Update();
-
-    while (1) {
+    init_timer();
+    
+    while (1) 
+    {
         handle_buttons();
-        if (frequency_changed) {
-            for (int i = 0; i < 3; i++) {
+        if (frequency_changed) 
+        {
+            for (int i = 0; i < 3; i++) 
+            {
                 GPIOC->ODR |= GPIO_ODR_ODR13;
                 delay(100000);
                 GPIOC->ODR &= ~GPIO_ODR_ODR13;
@@ -106,15 +149,6 @@ int main(void) {
             }
             frequency_changed = 0;
         }
-        
-        GPIOC->ODR |= GPIO_ODR_ODR13;
-        delay(frequencies[current_freq_index].delay / 2);
-        
-        GPIOC->ODR &= ~GPIO_ODR_ODR13;
-        delay(frequencies[current_freq_index].delay / 2);
-    while(1) {
-        *(volatile uint32_t*)(0x40011000 + 0x0C) ^= (1 << 13);
-        delay(500000);
     }
 }
 }
